@@ -1,0 +1,4 @@
+"evaluation_set","RMSE","MAE","R2","best_mtry","best_neighbors","local_weight","n_train","n_test","n_anchor_models"
+"all_independent_test_rows",22.6180720427545,12.5828671103526,0.949510100604058,7,1950,1,56673,24290,1000
+"test_rows_within_training_NPP_rule",22.6180720427545,12.5828671103526,0.949510100604058,7,1950,1,56673,24290,1000
+
