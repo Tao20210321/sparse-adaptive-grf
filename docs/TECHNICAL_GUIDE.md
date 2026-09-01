@@ -14,6 +14,8 @@ RFE does not use a fixed final variable list. It chooses from `candidate_feature
 
 The included 2001 sample is a code smoke test, not a calibrated benchmark. Its 1,000 rows yield fewer than 1,000 training rows after the held-out split, so `run_example.R` uses a 100--500-neighbour search. Keep the larger settings in `R/00_config.R` for the full annual data.
 
+The public sample is stored in two ordered 500-row CSV parts solely because the available upload channel has a one-megabyte transfer limit. `scripts/recombine_example_data.R` reconstructs the one-table sample and verifies the final row count.
+
 ## Raster prediction and resources
 
 BIO1 defines the output grid. Numeric predictors are projected with average resampling; land cover uses nearest-neighbour resampling. The final mask retains only LC codes 9 and 10 as requested. Prediction deliberately converts the masked stack to one `data.frame` and calls the custom model predictor, rather than `terra::predict()`.
