@@ -27,6 +27,7 @@ To smoke-test RFE/training with the committed 1,000-row sample, run `source("run
 | `scripts/create_example_data.R` | Creates the committed 2001 first-1,000-row demonstration table from a local full CSV. |
 | `data/example/` | The deliberately limited, non-raster example input only. |
 | `docs/TECHNICAL_GUIDE.md` | Inputs, outputs, assumptions, performance evidence and troubleshooting. |
+| `docs/SHOWCASE_2001.md` | Public 2001 RFE and independent-test showcase, with interpretation limits. |
 
 ## Data safety
 
