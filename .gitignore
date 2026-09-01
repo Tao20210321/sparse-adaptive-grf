@@ -1,0 +1,16 @@
+# Keep only the explicitly curated, small demonstration table.
+data/*
+!data/example/
+!data/example/nature_database_2001_first1000.csv
+
+# Never publish full inputs, intermediate rasters, model objects, or run outputs.
+results/
+example_results/
+*.tif
+*.tiff
+*.fst
+*.rds
+*.RData
+*.Rhistory
+.Rproj.user/
+
