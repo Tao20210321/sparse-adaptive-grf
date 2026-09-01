@@ -1,4 +1,4 @@
-# Sparse adaptive GRF
+# NPP sparse adaptive GRF
 
 This is a reproducible R workflow that trains a separate sparse adaptive geographically weighted random forest (SA-GRF) for each configured year, uses RFE to choose predictors, and predicts NPP for Tibetan-Plateau MCD12Q1 LC_Type1 classes 9 and 10.
 
@@ -30,7 +30,7 @@ To smoke-test RFE/training with the committed 1,000-row sample, run `source("run
 
 ## Data safety
 
-Only `data/example/nature_database_2001_first1000.csv` is intended for version control. It contains the first 1,000 2001 table records after removal of the file's row-index column. Full training tables, rasters, RDS models and outputs are excluded by `.gitignore`.
+The public repository contains exactly 1,000 2001 records after removal of the file row-index column. To keep each web upload below the transport limit, they are stored as two ordered 500-row files in `data/example/`; run `source("scripts/recombine_example_data.R")` to reconstruct `nature_database_2001_first1000.csv`. Full training tables, rasters, RDS models and outputs are excluded by `.gitignore`.
 
 ## Interpretation boundary
 
