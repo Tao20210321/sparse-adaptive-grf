@@ -2,6 +2,8 @@
 data/*
 !data/example/
 !data/example/nature_database_2001_first1000.csv
+!data/example/nature_database_2001_first1000_part_001.csv
+!data/example/nature_database_2001_first1000_part_002.csv
 
 # Never publish full inputs, intermediate rasters, model objects, or run outputs.
 results/
