@@ -1,4 +1,4 @@
-##Sparse adaptive GRF
+# Sparse adaptive GRF
 
 This is a reproducible R workflow that trains a separate sparse adaptive geographically weighted random forest (SA-GRF) for each configured year, uses RFE to choose predictors, and predicts NPP for Tibetan-Plateau MCD12Q1 LC_Type1 classes 9 and 10.
 
