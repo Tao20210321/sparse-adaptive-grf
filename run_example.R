@@ -6,6 +6,7 @@ source(file.path(project_root, "R", "00_config.R"))
 source(file.path(project_root, "R", "01_reproducibility.R"))
 source(file.path(project_root, "R", "02_sparse_adaptive_grf.R"))
 source(file.path(project_root, "R", "03_training.R"))
+source(file.path(project_root, "R", "05_workflow.R"))
 
 cfg <- default_npp_config(project_root)
 sample_file <- file.path(project_root, "data", "example", "nature_database_2001_first1000.csv")
