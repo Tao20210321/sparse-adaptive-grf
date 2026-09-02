@@ -1,0 +1,27 @@
+Package: sparseAdaptiveGRF
+Type: Package
+Title: Sparse Adaptive Geographically Weighted Random Forest for Annual NPP
+Version: 0.1.0
+Authors@R: person(given = "Tao20210321", role = c("aut", "cre"), email = "tao20210321@users.noreply.github.com")
+Description: Fits a sparse adaptive geographically weighted random forest
+    without materialising an N by N distance matrix. The package provides
+    synchronized NPP-centred cleaning, VIF filtering, random-forest recursive
+    feature elimination or importance ranking, annual model fitting, and
+    raster-to-data-frame prediction for user-supplied environmental rasters.
+License: file LICENSE
+Encoding: UTF-8
+Imports:
+    caret,
+    ggplot2,
+    RANN,
+    ranger,
+    randomForest,
+    terra
+Suggests:
+    ragg,
+    svglite,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+URL: https://github.com/Tao20210321/sparse-adaptive-grf
+BugReports: https://github.com/Tao20210321/sparse-adaptive-grf/issues
+
