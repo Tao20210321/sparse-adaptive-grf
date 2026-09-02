@@ -76,7 +76,7 @@ fit_local_forest <- function(data, formula, ids, distances, mtry, trees, seed) {
   )
 }
 
-sparse_grf_bandwidth <- function(formula, data, coords, minimum, maximum, step, trees, mtry, anchors, seed) {
+sparse_grf_bandwidth <- function(formula, data, coords, minimum, maximum, step, trees, mtry, anchors, seed, verbose = FALSE) {
   z <- prepare_grf_data(data, formula, coords)
   n <- nrow(z$data); min_k <- max(20L, length(z$parts$predictors) + 2L)
   candidates <- seq.int(as.integer(minimum), as.integer(min(maximum, n - 1L)), by = as.integer(step))
@@ -87,6 +87,7 @@ sparse_grf_bandwidth <- function(formula, data, coords, minimum, maximum, step, 
   dm <- chord_to_distance(knn$nn.dists); y <- z$data[[z$parts$response]]
   scores <- lapply(seq_along(candidates), function(i) {
     k <- candidates[i]; p <- numeric(length(focal))
+    if (isTRUE(verbose)) message(sprintf("  [bandwidth] candidate %d/%d: k=%d", i, length(candidates), k))
     for (j in seq_along(focal)) {
       use <- which(knn$nn.idx[j, ] != focal[j])[seq_len(k)]
       local <- fit_local_forest(z$data, z$parts$formula, knn$nn.idx[j, use], dm[j, use], mtry, trees, seed + i * 100000L + j)
@@ -100,13 +101,14 @@ sparse_grf_bandwidth <- function(formula, data, coords, minimum, maximum, step, 
   list(best = scores$neighbors[1], scores = scores)
 }
 
-fit_sparse_grf <- function(formula, data, coords, neighbors, trees, mtry, anchors, workers, seed) {
+fit_sparse_grf <- function(formula, data, coords, neighbors, trees, mtry, anchors, workers, seed, verbose = FALSE) {
   z <- prepare_grf_data(data, formula, coords); n <- nrow(z$data)
   if (neighbors < max(20L, length(z$parts$predictors) + 2L) || neighbors > n) stop("Invalid selected neighbour count.")
   anchor_ids <- spatial_anchors(z$coords, min(as.integer(anchors), n), seed)
   xyz <- lonlat_to_xyz(z$coords)
   knn <- RANN::nn2(xyz, xyz[anchor_ids, , drop = FALSE], k = as.integer(neighbors))
   distances <- chord_to_distance(knn$nn.dists)
+  if (isTRUE(verbose)) message(sprintf("  [fit_sparse_grf] fitting %d local forests with k=%d", length(anchor_ids), neighbors))
   fit_one <- function(i) fit_local_forest(z$data, z$parts$formula, knn$nn.idx[i, ], distances[i, ], mtry, trees, seed + i)
   local_models <- if (workers <= 1L) lapply(seq_along(anchor_ids), fit_one) else {
     cl <- parallel::makePSOCKcluster(min(as.integer(workers), length(anchor_ids)))
@@ -121,14 +123,19 @@ fit_sparse_grf <- function(formula, data, coords, neighbors, trees, mtry, anchor
     local_models = local_models, global_model = global, neighbors = neighbors), class = "sparse_grf")
 }
 
-predict.sparse_grf <- function(object, newdata, newcoords, local_weight = 1) {
+predict.sparse_grf <- function(object, newdata, newcoords, local_weight = 1, verbose = FALSE, label = "prediction") {
   if (!all(object$predictors %in% names(newdata))) stop("Prediction data lack model predictors.")
   if (nrow(newdata) != nrow(newcoords)) stop("Prediction data and coordinates differ in row count.")
   nearest <- RANN::nn2(object$anchor_xyz, lonlat_to_xyz(newcoords), k = 1L)$nn.idx[, 1]
   local <- numeric(nrow(newdata))
-  for (a in unique(nearest)) {
+  anchor_groups <- unique(nearest)
+  if (isTRUE(verbose)) message(sprintf("  [predict.sparse_grf] %s: %d rows across %d local models", label, nrow(newdata), length(anchor_groups)))
+  report_every <- max(1L, ceiling(length(anchor_groups) / 20L))
+  for (i in seq_along(anchor_groups)) {
+    a <- anchor_groups[i]
     rows <- which(nearest == a)
     local[rows] <- stats::predict(object$local_models[[a]], newdata[rows, object$predictors, drop = FALSE])$predictions
+    if (isTRUE(verbose) && (i %% report_every == 0L || i == length(anchor_groups))) message(sprintf("  [predict.sparse_grf] %s: local model %d/%d", label, i, length(anchor_groups)))
   }
   global <- stats::predict(object$global_model, newdata[, object$predictors, drop = FALSE])$predictions
   out <- local_weight * local + (1 - local_weight) * global
