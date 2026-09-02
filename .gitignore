@@ -1,7 +1,6 @@
-# Keep only the explicitly curated, small demonstration table.
+# Keep only the two explicitly curated, small demonstration-table parts.
 data/*
 !data/example/
-!data/example/nature_database_2001_first1000.csv
 !data/example/nature_database_2001_first1000_part_001.csv
 !data/example/nature_database_2001_first1000_part_002.csv
 
