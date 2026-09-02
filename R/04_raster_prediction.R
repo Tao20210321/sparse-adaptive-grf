@@ -55,7 +55,7 @@ resolve_new_filename <- function(file) {
 }
 
 # Deliberately uses raster -> data.frame -> custom predictor; it never calls terra::predict().
-predict_dataframe_raster <- function(model, raster_files, mask_file, output_file, local_weight) {
+predict_dataframe_raster <- function(model, raster_files, mask_file, output_file, local_weight, verbose = FALSE) {
   layers <- lapply(raster_files[model$predictors], terra::rast)
   env <- terra::rast(layers); names(env) <- model$predictors
   env <- terra::mask(env, terra::rast(mask_file))
@@ -64,8 +64,9 @@ predict_dataframe_raster <- function(model, raster_files, mask_file, output_file
   x <- as.matrix(df[, model$predictors, drop = FALSE]); storage.mode(x) <- "double"
   df <- df[apply(is.finite(x), 1L, all), , drop = FALSE]
   if (!nrow(df)) stop("No valid prediction cells.")
+  if (isTRUE(verbose)) message(sprintf("  [raster prediction] %d valid raster cells converted to data.frame", nrow(df)))
   coords <- as.matrix(df[, c("x", "y")])
-  pred <- predict.sparse_grf(model, df[, model$predictors, drop = FALSE], coords, local_weight)
+  pred <- predict.sparse_grf(model, df[, model$predictors, drop = FALSE], coords, local_weight, verbose = verbose, label = "raster cells")
   values <- rep(NA_real_, terra::ncell(template))
   values[terra::cellFromXY(template, coords)] <- pred
   output <- terra::rast(template); terra::values(output) <- values; names(output) <- "NPP_predicted"
@@ -75,28 +76,34 @@ predict_dataframe_raster <- function(model, raster_files, mask_file, output_file
 }
 
 predict_one_year_raster <- function(cfg, year, trained) {
+  progress_note(cfg$verbose_progress, "Raster prediction: index and boundary", "START")
   idx <- index_tifs(cfg$data_root); boundary <- terra::vect(cfg$boundary_file)
   bio1 <- source_file_for_feature("bio1", year, idx, cfg$custom_file_rules)
   template <- terra::mask(terra::crop(terra::rast(bio1), boundary), boundary)
   year_dir <- trained$paths$output_dir; predictor_dir <- file.path(year_dir, "predictors")
   dir.create(predictor_dir, recursive = TRUE, showWarnings = FALSE)
   files <- setNames(character(length(trained$selected_features)), trained$selected_features)
-  for (feature in trained$selected_features) {
+  for (i in seq_along(trained$selected_features)) {
+    feature <- trained$selected_features[i]
+    progress_note(cfg$verbose_progress, sprintf("Raster predictor %d/%d", i, length(trained$selected_features)), "START", feature)
     source <- source_file_for_feature(feature, year, idx, cfg$custom_file_rules)
     target <- file.path(predictor_dir, paste0(feature, "_", year, ".tif"))
     terra::writeRaster(align_feature(source, template, boundary, feature == "lc"), target, overwrite = cfg$overwrite_outputs,
       wopt = list(datatype = "FLT4S", gdal = "COMPRESS=LZW"))
     files[[feature]] <- target
+    progress_note(cfg$verbose_progress, sprintf("Raster predictor %d/%d", i, length(trained$selected_features)), "DONE", feature)
   }
   lc_source <- source_file_for_feature("lc", year, idx, cfg$custom_file_rules)
   lc <- align_feature(lc_source, template, boundary, TRUE)
   mask_file <- file.path(year_dir, sprintf("TP_LC9_10_mask_%d.tif", year))
   terra::writeRaster(make_lc_class_mask(lc, cfg$grassland_lc_codes), mask_file, overwrite = cfg$overwrite_outputs,
     wopt = list(datatype = "INT1U", gdal = "COMPRESS=LZW"))
-  prediction_file <- predict_dataframe_raster(trained$model, files, mask_file, trained$paths$prediction_file, cfg$local_weight)
+  progress_note(cfg$verbose_progress, "Raster prediction: LC mask", "DONE")
+  prediction_file <- predict_dataframe_raster(trained$model, files, mask_file, trained$paths$prediction_file, cfg$local_weight, verbose = cfg$verbose_progress)
   write.csv(data.frame(feature = names(files), raster_file = unname(files)), file.path(year_dir, "predictor_manifest.csv"), row.names = FALSE)
   writeLines(c(paste0("prediction_file=", normalizePath(prediction_file, winslash = "/")),
     paste0("grassland_lc_codes=", paste(cfg$grassland_lc_codes, collapse = ","))), file.path(year_dir, "prediction_metadata.txt"))
+  progress_note(cfg$verbose_progress, "Raster prediction: write final GeoTIFF", "DONE", prediction_file)
   prediction_file
 }
 
