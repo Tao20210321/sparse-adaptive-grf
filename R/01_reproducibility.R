@@ -1,4 +1,4 @@
-required_packages <- c("ranger", "RANN", "caret", "randomForest", "terra", "sf", "ggplot2", "svglite", "ragg")
+required_packages <- c("ranger", "RANN", "caret", "randomForest", "terra", "ggplot2")
 
 progress_note <- function(enabled, label, state = "START", detail = NULL) {
   if (!isTRUE(enabled)) return(invisible(NULL))
@@ -40,7 +40,7 @@ write_run_provenance <- function(cfg, year, paths, extra = character()) {
     paste0("input_csv=", normalizePath(paths$input_csv, winslash = "/", mustWork = TRUE)),
     paste0("candidate_features=", paste(cfg$candidate_features, collapse = ",")),
     paste0("local_weight=", cfg$local_weight), paste0("n_anchor_models=", cfg$n_anchor_models),
-    extra, "", "sessionInfo:", capture.output(sessionInfo())
+    extra, "", "sessionInfo:", utils::capture.output(utils::sessionInfo())
   )
   writeLines(txt, file.path(paths$output_dir, "run_provenance.txt"))
 }
