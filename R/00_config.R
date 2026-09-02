@@ -40,7 +40,7 @@ default_npp_config <- function(project_root = normalizePath(".", winslash = "/",
     verbose_progress = TRUE,
     save_diagnostic_plots = TRUE,
     run_raster_prediction = TRUE,
-    overwrite_outputs = FALSE,
+    overwrite_outputs = TRUE,
     custom_file_rules = c()
   )
 }
