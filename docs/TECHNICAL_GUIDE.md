@@ -16,6 +16,12 @@ The included 2001 sample is a code smoke test, not a calibrated benchmark. Its 1
 
 The public sample is stored in two ordered 500-row CSV parts solely because the available upload channel has a one-megabyte transfer limit. `scripts/recombine_example_data.R` reconstructs the one-table sample and verifies the final row count.
 
+## Variable-selection options
+
+`vif_rfe` iteratively removes the highest-VIF predictor until all remaining VIF values are at or below the threshold (or the configured minimum feature count is reached), then performs cross-validated RFE. `vif_importance` uses the same VIF filter, ranks the survivors by training-set random-forest permutation importance, and uses OOB RMSE to select among ranked top-k subsets. Both pathways are run after the independent test split and do not inspect test labels during variable selection.
+
+Each run writes `vif_filter_history.csv`, `vif_final.csv`, `feature_selection_summary.csv`, method-specific selection tables, and editable SVG/PDF plus PNG/TIFF diagnostic figures. VIF is a linear-collinearity screen; it does not establish causal independence, particularly for categorical land-cover codes represented numerically.
+
 ## Raster prediction and resources
 
 BIO1 defines the output grid. Numeric predictors are projected with average resampling; land cover uses nearest-neighbour resampling. The final mask retains only LC codes 9 and 10 as requested. Prediction deliberately converts the masked stack to one `data.frame` and calls the custom model predictor, rather than `terra::predict()`.
