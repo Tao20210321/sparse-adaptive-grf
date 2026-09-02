@@ -34,6 +34,20 @@ align_feature <- function(path, template, boundary, categorical = FALSE) {
   terra::mask(x, boundary)
 }
 
+# `%in%` is a base-vector operator and does not dispatch safely for SpatRaster.
+# Build the mask with terra raster comparisons so it also works for >2 LC classes.
+make_lc_class_mask <- function(lc, codes) {
+  if (!inherits(lc, "SpatRaster") || terra::nlyr(lc) != 1L) stop("Land-cover input must be a single-layer SpatRaster.")
+  codes <- as.integer(unlist(codes, use.names = FALSE))
+  if (!length(codes) || any(!is.finite(codes))) stop("grassland_lc_codes must be a non-empty finite integer vector.")
+  codes <- unique(codes)
+  keep <- terra::ifel(lc == codes[1L], 1L, 0L)
+  if (length(codes) > 1L) {
+    for (code in codes[-1L]) keep <- terra::ifel(lc == code, 1L, keep)
+  }
+  terra::ifel(keep == 1L, 1L, NA_integer_)
+}
+
 resolve_new_filename <- function(file) {
   if (!file.exists(file)) return(file)
   stem <- tools::file_path_sans_ext(file); ext <- tools::file_ext(file)
@@ -77,7 +91,7 @@ predict_one_year_raster <- function(cfg, year, trained) {
   lc_source <- source_file_for_feature("lc", year, idx, cfg$custom_file_rules)
   lc <- align_feature(lc_source, template, boundary, TRUE)
   mask_file <- file.path(year_dir, sprintf("TP_LC9_10_mask_%d.tif", year))
-  terra::writeRaster(terra::ifel(lc %in% cfg$grassland_lc_codes, 1, NA), mask_file, overwrite = cfg$overwrite_outputs,
+  terra::writeRaster(make_lc_class_mask(lc, cfg$grassland_lc_codes), mask_file, overwrite = cfg$overwrite_outputs,
     wopt = list(datatype = "INT1U", gdal = "COMPRESS=LZW"))
   prediction_file <- predict_dataframe_raster(trained$model, files, mask_file, trained$paths$prediction_file, cfg$local_weight)
   write.csv(data.frame(feature = names(files), raster_file = unname(files)), file.path(year_dir, "predictor_manifest.csv"), row.names = FALSE)
