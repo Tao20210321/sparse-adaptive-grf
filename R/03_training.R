@@ -1,6 +1,6 @@
 read_and_split_year <- function(cfg, paths) {
   if (!file.exists(paths$input_csv)) stop("Training CSV is missing: ", paths$input_csv)
-  raw <- read.csv(paths$input_csv, check.names = TRUE, stringsAsFactors = FALSE)
+  raw <- utils::read.csv(paths$input_csv, check.names = TRUE, stringsAsFactors = FALSE)
   required <- unique(c(cfg$target, cfg$coord_cols, cfg$candidate_features))
   missing <- setdiff(required, names(raw))
   if (length(missing)) stop("CSV lacks required columns: ", paste(missing, collapse = ", "))
@@ -37,7 +37,13 @@ calculate_vif <- function(data, features) {
 }
 
 filter_features_vif <- function(train, cfg) {
-  features <- cfg$candidate_features; min_features <- max(1L, min(as.integer(cfg$vif_min_features), length(features)))
+  excluded <- unique(cfg$vif_exclude_features %||% character())
+  features <- setdiff(cfg$candidate_features, excluded)
+  if (!length(features)) {
+    final_vif <- data.frame(feature = excluded, VIF = NA_real_, status = "excluded_from_vif", stringsAsFactors = FALSE)
+    return(list(features = excluded, final_vif = final_vif, history = data.frame(step = integer(), n_features = integer(), feature = character(), VIF = numeric(), action = character())))
+  }
+  min_features <- max(1L, min(as.integer(cfg$vif_min_features), length(features)))
   history <- list(); step <- 0L
   repeat {
     vif <- calculate_vif(train, features); worst <- vif[which.max(vif$VIF), , drop = FALSE]
@@ -47,7 +53,14 @@ filter_features_vif <- function(train, cfg) {
     if (!remove) break
     features <- setdiff(features, worst$feature)
   }
-  list(features = features, final_vif = calculate_vif(train, features), history = do.call(rbind, history))
+  final_vif <- calculate_vif(train, features)
+  final_vif$status <- "retained"
+  if (length(excluded)) {
+    final_vif <- rbind(final_vif, data.frame(feature = excluded, VIF = NA_real_, status = "excluded_from_vif", stringsAsFactors = FALSE))
+  }
+  final_vif <- final_vif[match(cfg$candidate_features[cfg$candidate_features %in% final_vif$feature], final_vif$feature), , drop = FALSE]
+  selected <- cfg$candidate_features[cfg$candidate_features %in% c(features, excluded)]
+  list(features = selected, final_vif = final_vif, history = do.call(rbind, history))
 }
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
@@ -90,19 +103,24 @@ metric_row <- function(observed, predicted) data.frame(RMSE = sqrt(mean((observe
 save_scientific_plot <- function(plot, stem, width_mm = 180, height_mm = 120) {
   w <- width_mm / 25.4; h <- height_mm / 25.4
   ggplot2::ggsave(paste0(stem, ".png"), plot, width = width_mm, height = height_mm, units = "mm", dpi = 300)
-  svglite::svglite(paste0(stem, ".svg"), width = w, height = h)
-  print(plot); grDevices::dev.off()
+  if (requireNamespace("svglite", quietly = TRUE)) {
+    svglite::svglite(paste0(stem, ".svg"), width = w, height = h)
+    print(plot); grDevices::dev.off()
+  }
   grDevices::cairo_pdf(paste0(stem, ".pdf"), width = w, height = h, family = "Arial")
   print(plot); grDevices::dev.off()
-  ragg::agg_tiff(paste0(stem, ".tiff"), width = w, height = h, units = "in", res = 600)
-  print(plot); grDevices::dev.off()
+  if (requireNamespace("ragg", quietly = TRUE)) {
+    ragg::agg_tiff(paste0(stem, ".tiff"), width = w, height = h, units = "in", res = 600)
+    print(plot); grDevices::dev.off()
+  }
 }
 
 save_diagnostic_plots <- function(selection, observed, predicted, figure_dir, cfg) {
   if (!isTRUE(cfg$save_diagnostic_plots)) return(invisible(NULL))
   dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
   theme_science <- ggplot2::theme_classic(base_size = 11, base_family = "Arial") + ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
-  vif <- selection$vif_final; vif$feature <- stats::reorder(vif$feature, vif$VIF)
+  vif <- selection$vif_final[is.finite(selection$vif_final$VIF), , drop = FALSE]
+  vif$feature <- stats::reorder(vif$feature, vif$VIF)
   p_vif <- ggplot2::ggplot(vif, ggplot2::aes(feature, VIF)) + ggplot2::geom_col(fill = "#4C78A8") + ggplot2::coord_flip() + ggplot2::geom_hline(yintercept = cfg$vif_threshold, linetype = 2, colour = "#C44E52") + ggplot2::labs(title = "Final VIF after iterative filtering", x = NULL, y = "VIF") + theme_science
   save_scientific_plot(p_vif, file.path(figure_dir, "vif_final"))
   if (selection$method == "vif_rfe") {
@@ -127,27 +145,28 @@ save_diagnostic_plots <- function(selection, observed, predicted, figure_dir, cf
 }
 
 train_one_year <- function(cfg, year) {
+  validate_npp_config(cfg)
   paths <- year_paths(cfg, year); prepare_output_dir(paths$output_dir, cfg$overwrite_outputs)
   split <- run_step(cfg$verbose_progress, "01/09 synchronized NPP cleaning and train/test split", read_and_split_year(cfg, paths))
   vif <- run_step(cfg$verbose_progress, "02/09 training-set VIF filtering", filter_features_vif(split$train, cfg))
-  write.csv(vif$history, file.path(paths$output_dir, "vif_filter_history.csv"), row.names = FALSE); write.csv(vif$final_vif, file.path(paths$output_dir, "vif_final.csv"), row.names = FALSE)
+  utils::write.csv(vif$history, file.path(paths$output_dir, "vif_filter_history.csv"), row.names = FALSE); utils::write.csv(vif$final_vif, file.path(paths$output_dir, "vif_final.csv"), row.names = FALSE)
   progress_note(cfg$verbose_progress, "VIF retained predictors", "INFO", paste(vif$features, collapse = ", "))
   selection <- if (cfg$feature_selection_method == "vif_rfe") {
-    d <- run_step(cfg$verbose_progress, "03/09 RFE after VIF", select_features_rfe(split$train, cfg, vif$features)); write.csv(d$results, file.path(paths$output_dir, "rfe_cv_results.csv"), row.names = FALSE); list(method = "vif_rfe", features = d$features, details = d, vif_final = vif$final_vif)
+    d <- run_step(cfg$verbose_progress, "03/09 RFE after VIF", select_features_rfe(split$train, cfg, vif$features)); utils::write.csv(d$results, file.path(paths$output_dir, "rfe_cv_results.csv"), row.names = FALSE); list(method = "vif_rfe", features = d$features, details = d, vif_final = vif$final_vif)
   } else if (cfg$feature_selection_method == "vif_importance") {
-    d <- run_step(cfg$verbose_progress, "03/09 random-forest importance after VIF", select_features_importance(split$train, cfg, vif$features)); write.csv(d$ranking, file.path(paths$output_dir, "rf_permutation_importance.csv"), row.names = FALSE); write.csv(d$subset_scores, file.path(paths$output_dir, "rf_importance_subset_oob.csv"), row.names = FALSE); list(method = "vif_importance", features = d$features, details = d, vif_final = vif$final_vif)
+    d <- run_step(cfg$verbose_progress, "03/09 random-forest importance after VIF", select_features_importance(split$train, cfg, vif$features)); utils::write.csv(d$ranking, file.path(paths$output_dir, "rf_permutation_importance.csv"), row.names = FALSE); utils::write.csv(d$subset_scores, file.path(paths$output_dir, "rf_importance_subset_oob.csv"), row.names = FALSE); list(method = "vif_importance", features = d$features, details = d, vif_final = vif$final_vif)
   } else stop("feature_selection_method must be 'vif_rfe' or 'vif_importance'.")
-  write.csv(data.frame(feature = selection$features), paths$rfe_file, row.names = FALSE); write.csv(data.frame(method = selection$method, feature = selection$features), file.path(paths$output_dir, "feature_selection_summary.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(feature = selection$features), paths$rfe_file, row.names = FALSE); utils::write.csv(data.frame(method = selection$method, feature = selection$features), file.path(paths$output_dir, "feature_selection_summary.csv"), row.names = FALSE)
   progress_note(cfg$verbose_progress, "Selected predictors", "INFO", paste(selection$features, collapse = ", "))
   train_df <- data.frame(NPP = split$train[[cfg$target]], split$train[, selection$features, drop = FALSE], check.names = FALSE); test_df <- data.frame(NPP = split$test[[cfg$target]], split$test[, selection$features, drop = FALSE], check.names = FALSE); formula <- stats::reformulate(selection$features, response = "NPP")
-  mtry_scores <- run_step(cfg$verbose_progress, "04/09 mtry OOB tuning", tune_mtry(formula, train_df, cfg$final_trees, cfg$seed + 200L)); best_mtry <- mtry_scores$mtry[1]; write.csv(mtry_scores, file.path(paths$output_dir, "mtry_oob.csv"), row.names = FALSE)
+  mtry_scores <- run_step(cfg$verbose_progress, "04/09 mtry OOB tuning", tune_mtry(formula, train_df, cfg$final_trees, cfg$seed + 200L)); best_mtry <- mtry_scores$mtry[1]; utils::write.csv(mtry_scores, file.path(paths$output_dir, "mtry_oob.csv"), row.names = FALSE)
   train_coords <- as.matrix(split$train[, cfg$coord_cols, drop = FALSE]); test_coords <- as.matrix(split$test[, cfg$coord_cols, drop = FALSE])
-  coarse <- run_step(cfg$verbose_progress, "05/09 coarse adaptive-neighbour search", sparse_grf_bandwidth(formula, train_df, train_coords, cfg$bw_coarse$min, cfg$bw_coarse$max, cfg$bw_coarse$step, cfg$bw_coarse$trees, best_mtry, cfg$bw_coarse$anchors, cfg$seed + 300L, verbose = cfg$verbose_progress)); write.csv(coarse$scores, file.path(paths$output_dir, "bandwidth_coarse.csv"), row.names = FALSE)
-  fine <- run_step(cfg$verbose_progress, "06/09 fine adaptive-neighbour search", sparse_grf_bandwidth(formula, train_df, train_coords, max(cfg$bw_coarse$min, coarse$best - cfg$bw_fine_half_width), min(nrow(train_df) - 1L, coarse$best + cfg$bw_fine_half_width), cfg$bw_fine_step, cfg$final_trees, best_mtry, cfg$bw_fine_anchors, cfg$seed + 400L, verbose = cfg$verbose_progress)); write.csv(fine$scores, file.path(paths$output_dir, "bandwidth_fine.csv"), row.names = FALSE)
+  coarse <- run_step(cfg$verbose_progress, "05/09 coarse adaptive-neighbour search", sparse_grf_bandwidth(formula, train_df, train_coords, cfg$bw_coarse$min, cfg$bw_coarse$max, cfg$bw_coarse$step, cfg$bw_coarse$trees, best_mtry, cfg$bw_coarse$anchors, cfg$seed + 300L, verbose = cfg$verbose_progress)); utils::write.csv(coarse$scores, file.path(paths$output_dir, "bandwidth_coarse.csv"), row.names = FALSE)
+  fine <- run_step(cfg$verbose_progress, "06/09 fine adaptive-neighbour search", sparse_grf_bandwidth(formula, train_df, train_coords, max(cfg$bw_coarse$min, coarse$best - cfg$bw_fine_half_width), min(nrow(train_df) - 1L, coarse$best + cfg$bw_fine_half_width), cfg$bw_fine_step, cfg$final_trees, best_mtry, cfg$bw_fine_anchors, cfg$seed + 400L, verbose = cfg$verbose_progress)); utils::write.csv(fine$scores, file.path(paths$output_dir, "bandwidth_fine.csv"), row.names = FALSE)
   model <- run_step(cfg$verbose_progress, "07/09 fit sparse adaptive GRF", fit_sparse_grf(formula, train_df, train_coords, fine$best, cfg$final_trees, best_mtry, cfg$n_anchor_models, cfg$outer_workers, cfg$seed + 500L, verbose = cfg$verbose_progress)); saveRDS(model, paths$model_file)
   predicted <- run_step(cfg$verbose_progress, "08/09 independent-test prediction", predict.sparse_grf(model, test_df, test_coords, cfg$local_weight, verbose = cfg$verbose_progress, label = "independent test"))
-  metrics <- cbind(year = year, selection_method = selection$method, n_train = nrow(train_df), n_test = nrow(test_df), best_mtry = best_mtry, best_neighbors = fine$best, local_weight = cfg$local_weight, metric_row(test_df$NPP, predicted)); write.csv(metrics, file.path(paths$output_dir, "test_metrics.csv"), row.names = FALSE)
-  write.csv(data.frame(source_row = split$test$source_row, x = test_coords[, 1], y = test_coords[, 2], NPP_observed = test_df$NPP, NPP_predicted = predicted), file.path(paths$output_dir, "test_predictions.csv"), row.names = FALSE); write.csv(data.frame(method = cfg$outlier_method, lower = split$npp_bounds[1], upper = split$npp_bounds[2], input_rows = split$n_raw, complete_rows_before_split = split$n_complete), file.path(paths$output_dir, "npp_cleaning_rule.csv"), row.names = FALSE)
+  metrics <- cbind(year = year, selection_method = selection$method, n_train = nrow(train_df), n_test = nrow(test_df), best_mtry = best_mtry, best_neighbors = fine$best, local_weight = cfg$local_weight, metric_row(test_df$NPP, predicted)); utils::write.csv(metrics, file.path(paths$output_dir, "test_metrics.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(source_row = split$test$source_row, x = test_coords[, 1], y = test_coords[, 2], NPP_observed = test_df$NPP, NPP_predicted = predicted), file.path(paths$output_dir, "test_predictions.csv"), row.names = FALSE); utils::write.csv(data.frame(method = cfg$outlier_method, lower = split$npp_bounds[1], upper = split$npp_bounds[2], input_rows = split$n_raw, complete_rows_before_split = split$n_complete), file.path(paths$output_dir, "npp_cleaning_rule.csv"), row.names = FALSE)
   run_step(cfg$verbose_progress, "09/09 save selection and fit diagnostics", save_diagnostic_plots(selection, test_df$NPP, predicted, file.path(paths$output_dir, "figures"), cfg))
   write_run_provenance(cfg, year, paths, c(paste0("feature_selection_method=", selection$method), paste0("vif_features=", paste(vif$features, collapse = ",")), paste0("selected_features=", paste(selection$features, collapse = ","))))
   list(model = model, selected_features = selection$features, metrics = metrics, paths = paths)
