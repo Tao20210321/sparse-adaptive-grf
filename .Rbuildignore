@@ -1,0 +1,10 @@
+^\.git$
+^\.gitignore$
+^00_run_workflow\.R$
+^data$
+^docs$
+^example_results$
+^results$
+^run_example\.R$
+^scripts$
+
