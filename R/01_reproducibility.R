@@ -1,4 +1,19 @@
-required_packages <- c("ranger", "RANN", "caret", "randomForest", "terra", "sf", "ggplot2")
+required_packages <- c("ranger", "RANN", "caret", "randomForest", "terra", "sf", "ggplot2", "svglite", "ragg")
+
+progress_note <- function(enabled, label, state = "START", detail = NULL) {
+  if (!isTRUE(enabled)) return(invisible(NULL))
+  suffix <- if (is.null(detail) || !nzchar(detail)) "" else paste0(" | ", detail)
+  message(sprintf("[%s] %s%s", state, label, suffix))
+  invisible(NULL)
+}
+
+run_step <- function(enabled, label, expr) {
+  progress_note(enabled, label, "START")
+  started <- proc.time()[["elapsed"]]
+  value <- force(expr)
+  progress_note(enabled, label, "DONE", sprintf("%.1f s", proc.time()[["elapsed"]] - started))
+  value
+}
 
 ensure_packages <- function(packages = required_packages) {
   missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
