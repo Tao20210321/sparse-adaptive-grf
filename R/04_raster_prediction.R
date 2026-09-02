@@ -76,6 +76,7 @@ predict_dataframe_raster <- function(model, raster_files, mask_file, output_file
 }
 
 predict_one_year_raster <- function(cfg, year, trained) {
+  validate_npp_config(cfg, require_raster = TRUE)
   progress_note(cfg$verbose_progress, "Raster prediction: index and boundary", "START")
   idx <- index_tifs(cfg$data_root); boundary <- terra::vect(cfg$boundary_file)
   bio1 <- source_file_for_feature("bio1", year, idx, cfg$custom_file_rules)
@@ -100,7 +101,7 @@ predict_one_year_raster <- function(cfg, year, trained) {
     wopt = list(datatype = "INT1U", gdal = "COMPRESS=LZW"))
   progress_note(cfg$verbose_progress, "Raster prediction: LC mask", "DONE")
   prediction_file <- predict_dataframe_raster(trained$model, files, mask_file, trained$paths$prediction_file, cfg$local_weight, verbose = cfg$verbose_progress)
-  write.csv(data.frame(feature = names(files), raster_file = unname(files)), file.path(year_dir, "predictor_manifest.csv"), row.names = FALSE)
+  utils::write.csv(data.frame(feature = names(files), raster_file = unname(files)), file.path(year_dir, "predictor_manifest.csv"), row.names = FALSE)
   writeLines(c(paste0("prediction_file=", normalizePath(prediction_file, winslash = "/")),
     paste0("grassland_lc_codes=", paste(cfg$grassland_lc_codes, collapse = ","))), file.path(year_dir, "prediction_metadata.txt"))
   progress_note(cfg$verbose_progress, "Raster prediction: write final GeoTIFF", "DONE", prediction_file)
