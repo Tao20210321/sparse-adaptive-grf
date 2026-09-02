@@ -1,11 +1,11 @@
-# Central configuration. Edit this file for a new run.
+# Central configuration. Set the three input paths before a production run.
 
 default_npp_config <- function(project_root = normalizePath(".", winslash = "/", mustWork = FALSE)) {
   list(
     project_root = project_root,
-    data_root = "F:/1km",
-    boundary_file = "D:/Tibet/region/TPBoundary_HF/TPBoundary_HF_wgs84.shp",
-    training_csv_pattern = "C:/Users/Lenovo/Desktop/1km-degradation/natue_database_year/nature_database_%d.csv",
+    data_root = NA_character_,
+    boundary_file = NA_character_,
+    training_csv_pattern = NA_character_,
     result_root = file.path(project_root, "results"),
     years = 2001L,
     target = "NPP",
@@ -23,6 +23,8 @@ default_npp_config <- function(project_root = normalizePath(".", winslash = "/",
     feature_selection_method = "vif_rfe",
     vif_threshold = 5,
     vif_min_features = 2L,
+    # Categorical predictors are retained for selection but excluded from numeric VIF models.
+    vif_exclude_features = c("lc"),
     rfe_folds = 10L,
     rfe_trees = 300L,
     importance_trees = 500L,
@@ -40,9 +42,31 @@ default_npp_config <- function(project_root = normalizePath(".", winslash = "/",
     verbose_progress = TRUE,
     save_diagnostic_plots = TRUE,
     run_raster_prediction = TRUE,
-    overwrite_outputs = TRUE,
+    overwrite_outputs = FALSE,
     custom_file_rules = c()
   )
+}
+
+validate_npp_config <- function(cfg, require_raster = FALSE) {
+  required <- c("target", "coord_cols", "candidate_features", "training_csv_pattern", "result_root")
+  missing <- required[!required %in% names(cfg)]
+  if (length(missing)) stop("Configuration is missing fields: ", paste(missing, collapse = ", "))
+  if (!is.character(cfg$training_csv_pattern) || length(cfg$training_csv_pattern) != 1L || is.na(cfg$training_csv_pattern) || !nzchar(cfg$training_csv_pattern)) {
+    stop("Set cfg$training_csv_pattern to a sprintf-compatible annual CSV path before training.")
+  }
+  if (!is.character(cfg$result_root) || length(cfg$result_root) != 1L || is.na(cfg$result_root) || !nzchar(cfg$result_root)) {
+    stop("Set cfg$result_root to a writable directory.")
+  }
+  excluded <- if (is.null(cfg$vif_exclude_features)) character() else cfg$vif_exclude_features
+  unknown_excluded <- setdiff(excluded, cfg$candidate_features)
+  if (length(unknown_excluded)) stop("vif_exclude_features are not candidate_features: ", paste(unknown_excluded, collapse = ", "))
+  if (isTRUE(require_raster)) {
+    for (field in c("data_root", "boundary_file")) {
+      value <- cfg[[field]]
+      if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) stop("Set cfg$", field, " before raster prediction.")
+    }
+  }
+  invisible(TRUE)
 }
 
 year_paths <- function(cfg, year) {
