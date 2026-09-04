@@ -1,52 +1,467 @@
-# NPP sparse adaptive GRF
+# SA-GRF Model Application and Parameter Guide
 
-This is an installable R package and reproducible workflow that trains a separate sparse adaptive geographically weighted random forest (SA-GRF) for each configured year, uses RFE to choose predictors, and predicts NPP for Tibetan-Plateau MCD12Q1 LC_Type1 classes 9 and 10.
+General-purpose version for spatially non-stationary regression and spatial extrapolation
 
-## Quick start
+Purpose. This guide presents Sparse Adaptive Geographically Weighted
+Random Forest (SA-GRF) as a domain-independent spatial machine-learning
+framework. It does not prescribe a particular data source, study area,
+time period, or response variable. The focus is on applicability, input
+requirements, modelling workflow, parameter meanings and setting rules,
+validation, spatial prediction, and common risks so that users from
+ecology, environmental science, agriculture, geography, public health,
+resource assessment, and other spatial-prediction fields can adapt the
+framework.
 
-1. Install the package from its local source directory: `pak::local_install(".")`, or run `devtools::install(".")`. If Windows cannot install from a Chinese-path directory, copy the repository to an ASCII-only path such as `C:/Rpackages/sparse-adaptive-grf` first.
-2. Create `cfg <- sparseAdaptiveGRF::default_npp_config()` and explicitly set `training_csv_pattern`, `result_root`, years, candidate features, and (for maps) `data_root`, `boundary_file`, and any `custom_file_rules`.
-3. Run `sparseAdaptiveGRF::run_npp_workflow(cfg)`. For local development without installation, assign the configured object to `npp_cfg`, then run `source("00_run_workflow.R")`.
-4. Read `results/<year>/test_metrics.csv` and `results/all_year_model_performance.csv` before interpreting maps.
+## 1. Model scope and suitable applications
 
-For a multi-year run, set `cfg$years <- 2001:2024` in `R/00_config.R` (or in a small local caller). Each year must have a matching training CSV and the rasters required by that year's RFE-selected variables.
+SA-GRF is an ensemble regression framework for predicting spatially
+continuous variables. It extends random forest by explicitly
+incorporating spatial neighborhoods, adaptive bandwidths, and
+distance-based case weights. Sparse spatial anchors reduce the
+computational burden of conventional local modelling, while global-local
+prediction fusion allows the model to learn both broad-scale
+relationships and spatially varying local relationships.
 
-To smoke-test RFE/training with the committed 1,000-row sample, run `source("run_example.R")`. It deliberately lowers the neighbour range and disables raster prediction; after a 70/30 split, the full-run minimum of 1,000 neighbours would be impossible for this small sample.
+SA-GRF is most appropriate when the problem has several of the following
+characteristics:
 
-## Repository contents
+The response is continuous, such as productivity, concentration, yield,
+temperature, a soil property, or a risk index.
 
-| Path | Purpose |
-|---|---|
-| `DESCRIPTION`, `NAMESPACE`, `man/` | Package metadata, public API and R help pages. |
-| `R/00_config.R` | Central configuration constructor, validation, years, seed, feature universe and model settings. |
-| `R/01_reproducibility.R` | Package validation, deterministic RNG and per-run provenance. |
-| `R/02_sparse_adaptive_grf.R` | Sparse kNN spatial search, bandwidth selection, local/global RF fitting and prediction. It avoids `as.matrix(dist(coords))`. |
-| `R/03_training.R` | NPP-centred synchronized cleaning, training-only VIF/selection, tuning, fitting, independent testing and diagnostic figures. |
-| `R/04_raster_prediction.R` | Dynamic selected-variable discovery, BIO1-grid alignment, LC 9/10 mask, raster-to-data.frame prediction and safe output naming. |
-| `R/05_workflow.R` | Public `run_npp_workflow()` orchestration function. |
-| `00_run_workflow.R` | Sequential entry point with start/end timing messages for every major step. |
-| `run_example.R` | Small-data RFE/training smoke test with valid small-sample settings. |
-| `data/example/` | The deliberately limited, non-raster example input only. |
-| `docs/TECHNICAL_GUIDE.md` | Inputs, outputs, assumptions, performance evidence and troubleshooting. |
-| `docs/SHOWCASE_2001.md` | Public 2001 RFE and independent-test showcase, with interpretation limits. |
+Predictor-response relationships may be nonlinear and involve complex
+interactions.
 
-## Data safety
+The study domain is spatially heterogeneous, so the effect of a
+predictor may vary among locations.
 
-The public repository contains exactly 1,000 2001 records after removal of the file row-index column. To keep each web upload below the transport limit, they are stored as two ordered 500-row files in `data/example/`. `run_example.R` reconstructs the temporary one-table CSV automatically. Full training tables, rasters, RDS models and outputs are excluded by `.gitignore`.
+Training samples are spatially uneven, making one fixed-distance
+neighborhood unsuitable for both dense and sparse areas.
 
-## Feature selection and diagnostics
+Point or limited reference samples must be extrapolated to a continuous
+spatial surface.
 
-Set `feature_selection_method` in `R/00_config.R` to `"vif_rfe"` for iterative VIF filtering followed by cross-validated RFE, or `"vif_importance"` for iterative VIF filtering followed by random-forest permutation-importance ranking. The latter evaluates ranked top-k subsets with training-set OOB RMSE before selecting k; it does not use the independent test data.
+A fully local GRF/GWR workflow would be computationally expensive, so
+local adaptability and large-area efficiency must be balanced.
 
-`lc` is excluded from numeric VIF regression by default because land-cover codes are categorical labels, not continuous measurements. It remains available to RFE or importance selection. Add other categorical predictors to `cfg$vif_exclude_features` as needed.
+Direct use is not recommended when the sample size is extremely small;
+the response is non-continuous without adapting the loss/classification
+component; predictors have poor spatial coverage; the prediction domain
+is far outside the environmental support of the training data; or there
+is no defensible reason to expect spatial non-stationarity.
 
-SVG and 600-dpi TIFF figure exports are optional: install `svglite` and `ragg` to enable them. PNG and PDF diagnostics remain available when either optional package is absent.
+## 2. Model structure
 
-Before a public package release, complete the author metadata in `DESCRIPTION` with the maintainer's real name and contact email. This repository is not configured as a CRAN submission.
+### 2.1 Global random forest
 
-Each completed year writes VIF tables, the selected variables, method-specific selection tables, independent-test metrics, and figures in `results/<year>/figures/`. The figures include final VIF, RFE or importance diagnostics, observed-versus-predicted NPP, and residual diagnostics.
+The global random forest uses all training samples to learn one common
+mapping from predictors X to response Y. It is well suited to
+nonlinearities, high-order interactions, and complex predictor
+combinations, but assumes that the fitted relationship is shared across
+the spatial domain. Within SA-GRF, the global model provides a stable
+broad-scale estimate and a shrinkage target for local predictions.
 
-## Interpretation boundary
+### 2.2 Adaptive local random forests
 
-The output is a model-based NPP estimate under observed annual environmental conditions. It is not automatically ecological potential NPP. If the calibration data were constrained to protected/stable/no-fire sites, the LC 9/10 map is a spatial extrapolation; report that explicitly and inspect extrapolation diagnostics before scientific use.
+For each local center, SA-GRF uses the k geographically nearest training
+samples instead of a fixed-distance radius. With a fixed k, the
+effective geographic radius contracts in densely sampled areas and
+expands in sparse areas, reducing fluctuations in local sample size
+caused by uneven sampling density.
 
+Within each neighborhood, samples receive a bisquare distance weight:
+
+where d_j is the distance from sample j to the local center and h is the
+distance to the farthest sample in that local neighborhood
+(equivalently, the kth neighbor under the implemented
+adaptive-neighborhood definition). Nearby observations therefore receive
+greater weight.
+
+### 2.3 Sparse spatial anchors
+
+A conventional GRF may fit a local model at every training point or even
+every prediction location, causing the number of forests to increase
+rapidly with sample size or raster size. SA-GRF first selects spatially
+representative anchor points from the training samples and fits local
+forests only at those anchors. At prediction time, a new location uses
+the local forest associated with its nearest anchor. This converts
+repeated location-by-location fitting into reuse of a finite set of
+local models and avoids the need for a full pairwise distance matrix.
+
+### 2.4 Global-local prediction fusion
+
+The final prediction combines local and global estimates:
+
+where λ ∈ \[0,1\] controls the contribution of the local model. λ = 0
+reduces the method to a global RF, whereas λ = 1 gives a purely local
+prediction. Intermediate values trade local spatial adaptability against
+global stability.
+
+## 3. Input data requirements
+
+| Input \| Minimum requirement \| Recommended practice \|
+
+| --- \| --- \| --- \|
+
+| Response Y \| Continuous numeric observations for training samples \|
+  Use a defensible range and an explicit outlier-handling rule. \|
+
+| Predictors X \| Same predictor fields in training and prediction data
+  \| Use predictors with clear meaning and adequate coverage of the
+  target domain. \|
+
+| Spatial coordinates \| Two-dimensional coordinates for every training
+  sample \| For longitude/latitude, use spherical/geodesic distance; for
+  projected coordinates, use an appropriate regional metric CRS. \|
+
+| Prediction data \| Variables with the same names and meanings as
+  training predictors \| Keep units, temporal definitions,
+  preprocessing, and spatial alignment consistent. \|
+
+| Sample size \| Sufficient to support local forests \| Prefer sample
+  size far larger than predictor count and adequate coverage of major
+  spatial/environmental gradients. \|
+
+Key principle. Reliable extrapolation is limited to the environmental
+space represented by the training samples. Geographic proximity does not
+guarantee environmental similarity. Users should therefore examine
+training-versus-prediction environmental coverage and, where
+appropriate, construct an Area of Applicability (AOA) or another
+extrapolation-risk mask.
+
+## 4. Standard modelling workflow
+
+### Step 1. Synchronized data cleaning
+
+Check Y, coordinates, and all candidate X variables together and retain
+only complete, finite records. Do not clean variables separately and
+then recombine them, because row correspondence can be lost. Outlier
+rules should be estimated from training data only.
+
+### Step 2. Training and independent test split
+
+Split the data before estimating outlier thresholds, selecting
+variables, or tuning parameters to prevent information leakage. A
+practical starting point is 70--80% for training and 20--30% for
+independent testing. Spatial applications should additionally use a
+spatial validation design.
+
+### Step 3. Collinearity control
+
+Iteratively calculate variance inflation factors (VIFs) for candidate
+predictors. A threshold of 5 is a practical starting point. At each
+iteration, remove the predictor with the largest VIF if it exceeds the
+threshold, subject to a minimum-predictor stopping rule. VIF screening
+is a stability tool and should not replace domain reasoning.
+
+### Step 4. Feature selection
+
+After VIF filtering, rank predictors using random-forest permutation
+importance. Evaluate top-k predictor subsets and select a candidate
+subset using minimum out-of-bag (OOB) RMSE or cross-validation error.
+Recursive feature elimination (RFE) can be used as an alternative or
+sensitivity analysis.
+
+### Step 5. RF hyperparameter tuning
+
+At minimum, tune mtry. With p retained predictors, mtry can be searched
+from 1 to p and selected by minimum OOB or cross-validation RMSE. Use
+enough trees for OOB error to stabilize; a moderate number can be used
+during tuning and a larger stable number for final fitting.
+
+### Step 6. Adaptive-neighborhood search
+
+Define a broad candidate range for k and perform a coarse search, then
+refine the search around the coarse optimum. For each candidate k,
+perform local hold-out-style prediction at spatially representative
+anchors and calculate RMSE, MAE, and R². RMSE can be the primary
+selection criterion, with MAE used as a secondary criterion.
+
+### Step 7. Fit anchor-based local forests
+
+Select representative anchors across the spatial domain. For each
+anchor, retrieve the optimal k nearest training samples, calculate
+distances and bisquare weights, and fit a local RF. The number of
+anchors controls the spatial resolution of local modelling and the
+computational cost.
+
+### Step 8. Fit the global forest
+
+Fit a global RF using all training samples and the same final predictor
+set. This provides the stable broad-scale component of the fused
+prediction.
+
+### Step 9. Determine λ and fuse predictions
+
+Evaluate candidate λ values using independent validation or, preferably
+for spatial extrapolation, spatial cross-validation. If λ has not been
+tuned, report it explicitly as a prespecified parameter rather than an
+optimal parameter.
+
+### Step 10. Independent evaluation and spatial prediction
+
+Report R², RMSE, MAE, and residual diagnostics on a completely isolated
+test set. Apply the final model to the target domain. For each
+prediction location, identify the nearest anchor local model and combine
+its prediction with the global prediction using λ.
+
+## 5. Key parameters and general setting rules
+
+| Parameter \| Meaning \| Practical starting point \| Setting rule \|
+
+| --- \| --- \| --- \| --- \|
+
+| test_fraction \| Independent test fraction \| 0.20--0.30 \| Use \~0.30
+  with large samples; reduce when samples are limited and strengthen
+  cross-validation. Spatial prediction requires additional spatial
+  validation. \|
+
+| outlier_method \| Response outlier handling \| IQR / 3σ / robust rule
+  \| Choose from distributional and domain considerations; estimate
+  thresholds from training data only. Avoid mechanical 3σ filtering for
+  heavy-tailed responses. \|
+
+| VIF threshold \| Collinearity threshold \| 5 \| Use a stricter value
+  when interpretability is important. For prediction-oriented RF, treat
+  VIF as a screening rule rather than an absolute requirement. \|
+
+| importance trees \| Trees for importance ranking \| \~500 \| Increase
+  until importance ranking and OOB error are sufficiently stable. \|
+
+| final trees \| Trees in final forests \| \~300--1000 \| Increase until
+  OOB/validation error stabilizes; more trees generally improve
+  stability but increase computation. \|
+
+| mtry \| Candidate predictors per split \| Search 1...p \| Select using
+  minimum OOB or CV RMSE. \|
+
+| k / neighbors \| Training samples in each local forest \| Data-driven
+  search \| Set a lower bound clearly larger than predictor count; a
+  practical constraint is k ≥ max(20, p+2), then define the search range
+  from total sample size, sampling density, and spatial scale. \|
+
+| coarse k step \| Increment in coarse k search \| \~5--15% of candidate
+  range \| Use a larger step for a wide range to first locate the error
+  basin. \|
+
+| fine k range \| Local search around coarse optimum \| Centered on
+  coarse optimum \| Choose range and step to resolve the local error
+  minimum without repeating the full coarse search. \|
+
+| bandwidth anchors \| Anchors used to evaluate k \| Several hundred \|
+  Spatial coverage is more important than count alone; increase anchors
+  for more complex or heterogeneous domains. \|
+
+| final anchors \| Number of fitted local forests \| Hundreds to several
+  thousand \| Choose from an accuracy-versus-computation curve. Too few
+  anchors oversmooth local variation; too many approach the cost of
+  conventional GRF. \|
+
+| kernel \| Distance-weight function \| Bisquare \| Appropriate when
+  local proximity should be emphasized. If the kernel changes, retune k
+  and revalidate performance. \|
+
+| λ / local_weight \| Weight of local prediction \| Search 0--1 \|
+  Coarse test 0, 0.2, 0.4, 0.6, 0.8, 1.0, then refine; choose using
+  spatial validation error. \|
+
+| workers \| Parallel processes \| Hardware-dependent \| Affects speed,
+  not the statistical definition. Avoid nested parallelism that exhausts
+  memory. \|
+
+| seed \| Random seed \| Fixed integer \| Keep fixed and record it for
+  reproducibility. \|
+
+## 6. Recommended order of parameter tuning
+
+Do not tune every parameter in one exhaustive grid. Because local
+forests dominate SA-GRF computation, progressively reduce the search
+space in the following order:
+
+1.  Data cleaning and training/test isolation
+
+2.  VIF filtering and predictor subset selection
+
+3.  mtry and basic RF tree-number stability
+
+4.  Coarse search for adaptive-neighborhood k
+
+5.  Fine search for k
+
+6.  Final number of anchors
+
+7.  Global-local fusion weight λ
+
+8.  Final independent testing and spatial cross-validation
+
+As a general rule, determine lower-cost components before moving to more
+expensive local-model tuning. If the predictor subset changes, reassess
+mtry and k because the sample size required by local forests may change
+with model dimensionality.
+
+## 7. Model validation and experimental design
+
+### 7.1 Minimum validation
+
+Independent test set: report R², RMSE, and MAE.
+
+Observed-versus-predicted plot: inspect systematic over- or
+underprediction.
+
+Residual-versus-predicted plot: inspect heteroscedasticity and nonlinear
+residual structure.
+
+Spatial residual map: inspect remaining spatial clustering.
+
+### 7.2 Recommended spatial validation
+
+For spatial extrapolation, random hold-out validation can overestimate
+generalization when nearby training and test observations are spatially
+autocorrelated. Use spatial block cross-validation, regional hold-out,
+or distance-separated validation. Block size or separation distance
+should be based on the spatial correlation scale of the response,
+sampling density, and intended prediction resolution rather than a
+universal fixed distance.
+
+### 7.3 Recommended ablation and sensitivity experiments
+
+| Experiment \| Setting \| Question addressed \|
+
+| --- \| --- \| --- \|
+
+| Global RF \| λ = 0 \| What is the baseline performance without local
+  relationships? \|
+
+| Local-only \| λ = 1 \| Does pure localization improve accuracy, and
+  does it reduce stability? \|
+
+| SA-GRF \| 0 \< λ \< 1 \| Does fusion improve both local adaptability
+  and stability? \|
+
+| Anchor sensitivity \| Vary number of anchors \| What
+  accuracy-efficiency trade-off is introduced by sparsification? \|
+
+| Bandwidth sensitivity \| Vary k \| How robust is the model to spatial
+  neighborhood scale? \|
+
+| Feature-selection sensitivity \| Compare selection strategies \| Do
+  predictions depend strongly on one feature-selection method? \|
+
+## 8. Spatial prediction requirements
+
+Training and prediction must use exactly the same predictor names,
+meanings, units, and preprocessing.
+
+Categorical predictors require category-preserving resampling;
+continuous predictors should not be processed with methods that alter
+category meaning.
+
+Every prediction location requires valid coordinates because local-model
+assignment is spatial.
+
+Environmental combinations outside the training support should be
+flagged as high extrapolation risk rather than accepted solely because
+the model returns a number.
+
+For large rasters, block-wise prediction is recommended to control
+memory use; blocking must not alter coordinates or predictor values.
+
+Along with predictions, record model version, predictor list, k, mtry,
+λ, anchor count, random seed, and validation metrics.
+
+## 9. Common problems and diagnostics
+
+| Symptom \| Likely cause \| Recommended action \|
+
+| --- \| --- \| --- \|
+
+| High random-test accuracy but much lower spatial-CV accuracy \|
+  Spatial autocorrelation or leakage \| Use spatial CV as the primary
+  generalization evidence and inspect train-test separation. \|
+
+| Highly variable local predictions \| k too small, sparse samples, or λ
+  too high \| Increase k, increase global contribution, and inspect
+  anchor coverage. \|
+
+| Overly smooth prediction surface \| Too few anchors, k too large, or λ
+  too low \| Increase anchors, reduce k, or increase local weight and
+  revalidate. \|
+
+| Abnormal edge predictions \| Poor reference coverage or environmental
+  extrapolation \| Improve training coverage, construct an AOA/risk
+  mask, and mask high-risk areas if necessary. \|
+
+| Excessive runtime \| k, anchor count, or tree count too large \| Use
+  fewer anchors for coarse tuning, remove uninformative parameter
+  combinations, and parallelize local forests. \|
+
+| Unstable variable importance \| Strong collinearity, too few trees, or
+  heterogeneous samples \| Control collinearity, increase tree count,
+  and assess ranking stability with repeated validation. \|
+
+| Different results across runs \| Unfixed random seed or parallel RNG
+  \| Fix the seed and record software environment and model
+  configuration. \|
+
+## 10. General parameter configuration template
+
+The following values are starting points for a first run, not universal
+optima. Adjust them to sample size, spatial density, predictor count,
+and spatial-validation results.
+
+response: `<continuous target>`{=html} coordinates: \<x, y\>
+test_fraction: 0.20--0.30 VIF_threshold: 5 feature_selection:
+permutation importance + OOB subset selection importance_trees: 500
+(increase until stable) final_trees: 300--1000 mtry: search 1...p
+neighbor_k: coarse-to-fine data-driven search minimum_k: max(20, p+2)
+spatial_kernel: bisquare bandwidth_anchors: several hundred, spatially
+representative final_anchors: several hundred to several thousand
+local_weight_lambda: search 0...1 validation: independent hold-out +
+spatial cross-validation metrics: R², RMSE, MAE random_seed: fixed and
+recorded
+
+## 11. Interpretation boundaries
+
+SA-GRF estimates a conditional expected response given predictors and
+spatial location. It does not automatically produce a causal quantity, a
+potential value, a maximum value, or a true undisturbed value. The
+interpretation and name of the output must follow from the definition of
+the training samples and the study design. If the training data
+represent a specific reference state, predictions may be interpreted as
+the expected response under that reference state. If the training data
+are ordinary observations, the output should be interpreted only as a
+prediction of the corresponding observational relationship.
+
+Conceptually, the model targets:
+
+Likewise, spatial weighting does not establish a causal effect of
+geographic proximity. It is a statistical device that allows
+relationships to vary spatially and gives nearby observations greater
+influence on local fitting.
+
+## 12. Minimum reproducibility checklist
+
+Definition and units of the response variable.
+
+Complete candidate-predictor list and final selected predictors.
+
+Sample-cleaning and outlier rules.
+
+Training/test split rule and random seed.
+
+VIF threshold and feature-selection method.
+
+mtry and number of trees.
+
+Coarse k range and step, fine k range and step, and final k.
+
+Number of bandwidth-search anchors and final anchors.
+
+Spatial-distance definition and kernel function.
+
+λ value and how it was selected.
+
+Independent-test and spatial-validation designs.
+
+R², RMSE, MAE, and runtime.
+
+Software versions and computing environment.
