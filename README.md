@@ -1,6 +1,7 @@
 # SA-GRF Model Application and Parameter Guide
 
-General-purpose version for spatially non-stationary regression and spatial extrapolation
+General-purpose version for spatially non-stationary regression and
+spatial extrapolation
 
 Purpose. This guide presents Sparse Adaptive Geographically Weighted
 Random Forest (SA-GRF) as a domain-independent spatial machine-learning
@@ -60,6 +61,8 @@ combinations, but assumes that the fitted relationship is shared across
 the spatial domain. Within SA-GRF, the global model provides a stable
 broad-scale estimate and a shrinkage target for local predictions.
 
+$X \rightarrow  Y$
+
 ### 2.2 Adaptive local random forests
 
 For each local center, SA-GRF uses the k geographically nearest training
@@ -69,6 +72,8 @@ expands in sparse areas, reducing fluctuations in local sample size
 caused by uneven sampling density.
 
 Within each neighborhood, samples receive a bisquare distance weight:
+
+$wj = [1 - (djh)2]2$
 
 where d_j is the distance from sample j to the local center and h is the
 distance to the farthest sample in that local neighborhood
@@ -87,9 +92,13 @@ the local forest associated with its nearest anchor. This converts
 repeated location-by-location fitting into reuse of a finite set of
 local models and avoids the need for a full pairwise distance matrix.
 
+$N \times  N$
+
 ### 2.4 Global-local prediction fusion
 
 The final prediction combines local and global estimates:
+
+$Ŷs = \lambda Ŷlocal(s) + (1 - \lambda )Ŷglobal(s)$
 
 where λ ∈ \[0,1\] controls the contribution of the local model. λ = 0
 reduces the method to a global RF, whereas λ = 1 gives a purely local
@@ -98,28 +107,38 @@ global stability.
 
 ## 3. Input data requirements
 
-| Input \| Minimum requirement \| Recommended practice \|
+  -----------------------------------------------------------------------
+  Input                   Minimum requirement     Recommended practice
+  ----------------------- ----------------------- -----------------------
+  Response Y              Continuous numeric      Use a defensible range
+                          observations for        and an explicit
+                          training samples        outlier-handling rule.
 
-| --- \| --- \| --- \|
+  Predictors X            Same predictor fields   Use predictors with
+                          in training and         clear meaning and
+                          prediction data         adequate coverage of
+                                                  the target domain.
 
-| Response Y \| Continuous numeric observations for training samples \|
-  Use a defensible range and an explicit outlier-handling rule. \|
+  Spatial coordinates     Two-dimensional         For longitude/latitude,
+                          coordinates for every   use spherical/geodesic
+                          training sample         distance; for projected
+                                                  coordinates, use an
+                                                  appropriate regional
+                                                  metric CRS.
 
-| Predictors X \| Same predictor fields in training and prediction data
-  \| Use predictors with clear meaning and adequate coverage of the
-  target domain. \|
+  Prediction data         Variables with the same Keep units, temporal
+                          names and meanings as   definitions,
+                          training predictors     preprocessing, and
+                                                  spatial alignment
+                                                  consistent.
 
-| Spatial coordinates \| Two-dimensional coordinates for every training
-  sample \| For longitude/latitude, use spherical/geodesic distance; for
-  projected coordinates, use an appropriate regional metric CRS. \|
-
-| Prediction data \| Variables with the same names and meanings as
-  training predictors \| Keep units, temporal definitions,
-  preprocessing, and spatial alignment consistent. \|
-
-| Sample size \| Sufficient to support local forests \| Prefer sample
-  size far larger than predictor count and adequate coverage of major
-  spatial/environmental gradients. \|
+  Sample size             Sufficient to support   Prefer sample size far
+                          local forests           larger than predictor
+                                                  count and adequate
+                                                  coverage of major
+                                                  spatial/environmental
+                                                  gradients.
+  -----------------------------------------------------------------------
 
 Key principle. Reliable extrapolation is limited to the environmental
 space represented by the training samples. Geographic proximity does not
@@ -206,70 +225,95 @@ its prediction with the global prediction using λ.
 
 ## 5. Key parameters and general setting rules
 
-| Parameter \| Meaning \| Practical starting point \| Setting rule \|
+  --------------------------------------------------------------------------------------
+  Parameter         Meaning           Practical starting   Setting rule
+                                      point                
+  ----------------- ----------------- -------------------- -----------------------------
+  test_fraction     Independent test  0.20--0.30           Use \~0.30 with large
+                    fraction                               samples; reduce when samples
+                                                           are limited and strengthen
+                                                           cross-validation. Spatial
+                                                           prediction requires
+                                                           additional spatial
+                                                           validation.
 
-| --- \| --- \| --- \| --- \|
+  outlier_method    Response outlier  IQR / 3σ / robust    Choose from distributional
+                    handling          rule                 and domain considerations;
+                                                           estimate thresholds from
+                                                           training data only. Avoid
+                                                           mechanical 3σ filtering for
+                                                           heavy-tailed responses.
 
-| test_fraction \| Independent test fraction \| 0.20--0.30 \| Use \~0.30
-  with large samples; reduce when samples are limited and strengthen
-  cross-validation. Spatial prediction requires additional spatial
-  validation. \|
+  VIF threshold     Collinearity      5                    Use a stricter value when
+                    threshold                              interpretability is
+                                                           important. For
+                                                           prediction-oriented RF, treat
+                                                           VIF as a screening rule
+                                                           rather than an absolute
+                                                           requirement.
 
-| outlier_method \| Response outlier handling \| IQR / 3σ / robust rule
-  \| Choose from distributional and domain considerations; estimate
-  thresholds from training data only. Avoid mechanical 3σ filtering for
-  heavy-tailed responses. \|
+  importance trees  Trees for         \~500                Increase until importance
+                    importance                             ranking and OOB error are
+                    ranking                                sufficiently stable.
 
-| VIF threshold \| Collinearity threshold \| 5 \| Use a stricter value
-  when interpretability is important. For prediction-oriented RF, treat
-  VIF as a screening rule rather than an absolute requirement. \|
+  final trees       Trees in final    \~300--1000          Increase until OOB/validation
+                    forests                                error stabilizes; more trees
+                                                           generally improve stability
+                                                           but increase computation.
 
-| importance trees \| Trees for importance ranking \| \~500 \| Increase
-  until importance ranking and OOB error are sufficiently stable. \|
+  mtry              Candidate         Search 1...p         Select using minimum OOB or
+                    predictors per                         CV RMSE.
+                    split                                  
 
-| final trees \| Trees in final forests \| \~300--1000 \| Increase until
-  OOB/validation error stabilizes; more trees generally improve
-  stability but increase computation. \|
+  k / neighbors     Training samples  Data-driven search   Set a lower bound clearly
+                    in each local                          larger than predictor count;
+                    forest                                 a practical constraint is k ≥
+                                                           max(20, p+2), then define the
+                                                           search range from total
+                                                           sample size, sampling
+                                                           density, and spatial scale.
 
-| mtry \| Candidate predictors per split \| Search 1...p \| Select using
-  minimum OOB or CV RMSE. \|
+  coarse k step     Increment in      \~5--15% of          Use a larger step for a wide
+                    coarse k search   candidate range      range to first locate the
+                                                           error basin.
 
-| k / neighbors \| Training samples in each local forest \| Data-driven
-  search \| Set a lower bound clearly larger than predictor count; a
-  practical constraint is k ≥ max(20, p+2), then define the search range
-  from total sample size, sampling density, and spatial scale. \|
+  fine k range      Local search      Centered on coarse   Choose range and step to
+                    around coarse     optimum              resolve the local error
+                    optimum                                minimum without repeating the
+                                                           full coarse search.
 
-| coarse k step \| Increment in coarse k search \| \~5--15% of candidate
-  range \| Use a larger step for a wide range to first locate the error
-  basin. \|
+  bandwidth anchors Anchors used to   Several hundred      Spatial coverage is more
+                    evaluate k                             important than count alone;
+                                                           increase anchors for more
+                                                           complex or heterogeneous
+                                                           domains.
 
-| fine k range \| Local search around coarse optimum \| Centered on
-  coarse optimum \| Choose range and step to resolve the local error
-  minimum without repeating the full coarse search. \|
+  final anchors     Number of fitted  Hundreds to several  Choose from an
+                    local forests     thousand             accuracy-versus-computation
+                                                           curve. Too few anchors
+                                                           oversmooth local variation;
+                                                           too many approach the cost of
+                                                           conventional GRF.
 
-| bandwidth anchors \| Anchors used to evaluate k \| Several hundred \|
-  Spatial coverage is more important than count alone; increase anchors
-  for more complex or heterogeneous domains. \|
+  kernel            Distance-weight   Bisquare             Appropriate when local
+                    function                               proximity should be
+                                                           emphasized. If the kernel
+                                                           changes, retune k and
+                                                           revalidate performance.
 
-| final anchors \| Number of fitted local forests \| Hundreds to several
-  thousand \| Choose from an accuracy-versus-computation curve. Too few
-  anchors oversmooth local variation; too many approach the cost of
-  conventional GRF. \|
+  λ / local_weight  Weight of local   Search 0--1          Coarse test 0, 0.2, 0.4, 0.6,
+                    prediction                             0.8, 1.0, then refine; choose
+                                                           using spatial validation
+                                                           error.
 
-| kernel \| Distance-weight function \| Bisquare \| Appropriate when
-  local proximity should be emphasized. If the kernel changes, retune k
-  and revalidate performance. \|
+  workers           Parallel          Hardware-dependent   Affects speed, not the
+                    processes                              statistical definition. Avoid
+                                                           nested parallelism that
+                                                           exhausts memory.
 
-| λ / local_weight \| Weight of local prediction \| Search 0--1 \|
-  Coarse test 0, 0.2, 0.4, 0.6, 0.8, 1.0, then refine; choose using
-  spatial validation error. \|
-
-| workers \| Parallel processes \| Hardware-dependent \| Affects speed,
-  not the statistical definition. Avoid nested parallelism that exhausts
-  memory. \|
-
-| seed \| Random seed \| Fixed integer \| Keep fixed and record it for
-  reproducibility. \|
+  seed              Random seed       Fixed integer        Keep fixed and record it for
+                                                           reproducibility.
+  --------------------------------------------------------------------------------------
 
 ## 6. Recommended order of parameter tuning
 
@@ -324,27 +368,36 @@ universal fixed distance.
 
 ### 7.3 Recommended ablation and sensitivity experiments
 
-| Experiment \| Setting \| Question addressed \|
+  -----------------------------------------------------------------------
+  Experiment              Setting                 Question addressed
+  ----------------------- ----------------------- -----------------------
+  Global RF               λ = 0                   What is the baseline
+                                                  performance without
+                                                  local relationships?
 
-| --- \| --- \| --- \|
+  Local-only              λ = 1                   Does pure localization
+                                                  improve accuracy, and
+                                                  does it reduce
+                                                  stability?
 
-| Global RF \| λ = 0 \| What is the baseline performance without local
-  relationships? \|
+  SA-GRF                  0 \< λ \< 1             Does fusion improve
+                                                  both local adaptability
+                                                  and stability?
 
-| Local-only \| λ = 1 \| Does pure localization improve accuracy, and
-  does it reduce stability? \|
+  Anchor sensitivity      Vary number of anchors  What
+                                                  accuracy-efficiency
+                                                  trade-off is introduced
+                                                  by sparsification?
 
-| SA-GRF \| 0 \< λ \< 1 \| Does fusion improve both local adaptability
-  and stability? \|
+  Bandwidth sensitivity   Vary k                  How robust is the model
+                                                  to spatial neighborhood
+                                                  scale?
 
-| Anchor sensitivity \| Vary number of anchors \| What
-  accuracy-efficiency trade-off is introduced by sparsification? \|
-
-| Bandwidth sensitivity \| Vary k \| How robust is the model to spatial
-  neighborhood scale? \|
-
-| Feature-selection sensitivity \| Compare selection strategies \| Do
-  predictions depend strongly on one feature-selection method? \|
+  Feature-selection       Compare selection       Do predictions depend
+  sensitivity             strategies              strongly on one
+                                                  feature-selection
+                                                  method?
+  -----------------------------------------------------------------------
 
 ## 8. Spatial prediction requirements
 
@@ -370,37 +423,48 @@ Along with predictions, record model version, predictor list, k, mtry,
 
 ## 9. Common problems and diagnostics
 
-| Symptom \| Likely cause \| Recommended action \|
+  -----------------------------------------------------------------------
+  Symptom                 Likely cause            Recommended action
+  ----------------------- ----------------------- -----------------------
+  High random-test        Spatial autocorrelation Use spatial CV as the
+  accuracy but much lower or leakage              primary generalization
+  spatial-CV accuracy                             evidence and inspect
+                                                  train-test separation.
 
-| --- \| --- \| --- \|
+  Highly variable local   k too small, sparse     Increase k, increase
+  predictions             samples, or λ too high  global contribution,
+                                                  and inspect anchor
+                                                  coverage.
 
-| High random-test accuracy but much lower spatial-CV accuracy \|
-  Spatial autocorrelation or leakage \| Use spatial CV as the primary
-  generalization evidence and inspect train-test separation. \|
+  Overly smooth           Too few anchors, k too  Increase anchors,
+  prediction surface      large, or λ too low     reduce k, or increase
+                                                  local weight and
+                                                  revalidate.
 
-| Highly variable local predictions \| k too small, sparse samples, or λ
-  too high \| Increase k, increase global contribution, and inspect
-  anchor coverage. \|
+  Abnormal edge           Poor reference coverage Improve training
+  predictions             or environmental        coverage, construct an
+                          extrapolation           AOA/risk mask, and mask
+                                                  high-risk areas if
+                                                  necessary.
 
-| Overly smooth prediction surface \| Too few anchors, k too large, or λ
-  too low \| Increase anchors, reduce k, or increase local weight and
-  revalidate. \|
+  Excessive runtime       k, anchor count, or     Use fewer anchors for
+                          tree count too large    coarse tuning, remove
+                                                  uninformative parameter
+                                                  combinations, and
+                                                  parallelize local
+                                                  forests.
 
-| Abnormal edge predictions \| Poor reference coverage or environmental
-  extrapolation \| Improve training coverage, construct an AOA/risk
-  mask, and mask high-risk areas if necessary. \|
+  Unstable variable       Strong collinearity,    Control collinearity,
+  importance              too few trees, or       increase tree count,
+                          heterogeneous samples   and assess ranking
+                                                  stability with repeated
+                                                  validation.
 
-| Excessive runtime \| k, anchor count, or tree count too large \| Use
-  fewer anchors for coarse tuning, remove uninformative parameter
-  combinations, and parallelize local forests. \|
-
-| Unstable variable importance \| Strong collinearity, too few trees, or
-  heterogeneous samples \| Control collinearity, increase tree count,
-  and assess ranking stability with repeated validation. \|
-
-| Different results across runs \| Unfixed random seed or parallel RNG
-  \| Fix the seed and record software environment and model
-  configuration. \|
+  Different results       Unfixed random seed or  Fix the seed and record
+  across runs             parallel RNG            software environment
+                                                  and model
+                                                  configuration.
+  -----------------------------------------------------------------------
 
 ## 10. General parameter configuration template
 
@@ -408,16 +472,16 @@ The following values are starting points for a first run, not universal
 optima. Adjust them to sample size, spatial density, predictor count,
 and spatial-validation results.
 
-response: `<continuous target>`{=html} coordinates: \<x, y\>
-test_fraction: 0.20--0.30 VIF_threshold: 5 feature_selection:
-permutation importance + OOB subset selection importance_trees: 500
-(increase until stable) final_trees: 300--1000 mtry: search 1...p
-neighbor_k: coarse-to-fine data-driven search minimum_k: max(20, p+2)
-spatial_kernel: bisquare bandwidth_anchors: several hundred, spatially
-representative final_anchors: several hundred to several thousand
-local_weight_lambda: search 0...1 validation: independent hold-out +
-spatial cross-validation metrics: R², RMSE, MAE random_seed: fixed and
-recorded
+response: `<continuous target>`{=html}coordinates: \<x,
+y\>test_fraction: 0.20--0.30VIF_threshold: 5feature_selection:
+permutation importance + OOB subset selectionimportance_trees: 500
+(increase until stable)final_trees: 300--1000mtry: search
+1...pneighbor_k: coarse-to-fine data-driven searchminimum_k: max(20,
+p+2)spatial_kernel: bisquarebandwidth_anchors: several hundred,
+spatially representativefinal_anchors: several hundred to several
+thousandlocal_weight_lambda: search 0...1validation: independent
+hold-out + spatial cross-validationmetrics: R², RMSE, MAErandom_seed:
+fixed and recorded
 
 ## 11. Interpretation boundaries
 
@@ -432,6 +496,8 @@ are ordinary observations, the output should be interpreted only as a
 prediction of the corresponding observational relationship.
 
 Conceptually, the model targets:
+
+$E[Y | X, s]$
 
 Likewise, spatial weighting does not establish a causal effect of
 geographic proximity. It is a statistical device that allows
